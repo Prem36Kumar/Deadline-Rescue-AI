@@ -158,11 +158,12 @@ export default function Home() {
         const base64 = await imageToBase64(imageFile)
         body = { image: base64, mediaType: imageFile.type }
       } else body = { message }
-      const res  = await fetch('/api/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const res  = await fetch('/api/agent', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const data = await res.json()
       if (!res.ok || !data.success) { setError(data.message ?? 'Something went wrong. Please try again.'); return }
       setResult(data.data)
       setProvider(data.provider ?? 'gemini')
+      if (data.subtasks?.length) setAutoSubtasks(data.subtasks)
       fetch('/api/breakdown', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
