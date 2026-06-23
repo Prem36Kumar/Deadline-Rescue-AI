@@ -15,9 +15,12 @@ const TextSchema  = z.object({ message: z.string().min(10).max(3000) })
 const ImageSchema = z.object({ image: z.string().min(10), mediaType: z.string().min(3) })
 
 function extractJson(raw: string): string {
-  const c = raw.replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'').trim()
+  let c = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/g, '').trim()
   const s = c.indexOf('{'), e = c.lastIndexOf('}')
-  return s === -1 || e === -1 ? c : c.slice(s, e + 1)
+  if (s === -1 || e === -1) return c
+  c = c.slice(s, e + 1)
+  c = c.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']')
+  return c
 }
 
 function isQuotaError(err: any): boolean {
