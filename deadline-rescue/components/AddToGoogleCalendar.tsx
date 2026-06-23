@@ -30,7 +30,7 @@ export default function AddToGoogleCalendar({
   }
 
   return (
-    
+    <a
       href={buildUrl()}
       target="_blank"
       rel="noopener noreferrer"
