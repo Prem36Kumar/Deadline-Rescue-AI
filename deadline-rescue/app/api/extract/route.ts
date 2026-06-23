@@ -12,98 +12,113 @@ function extractJson(raw: string): string {
   return s === -1 || e === -1 ? c : c.slice(s, e + 1)
 }
 
-// ── Gemini function-calling agent loop ───────────────────────────────────────
+// ── GROQ PRIMARY ──────────────────────────────────────────────────────────────
+async function callGroq(body: any): Promise<any> {
+  const groqKey = process.env.GROQ_API_KEY
+  if (!groqKey) throw new Error('No Groq key')
+  const isImage = 'image' in body
+  // Use vision model for images, fast model for text
+  const model = 'llama-3.3-70b-versatile'
+  const messages = isImage
+    ? [{ role: 'user', content: [
+        { type: 'text', text: getSystemPrompt() + '\n\nExtract deadline from this image. Respond with ONLY valid JSON.' },
+        { type: 'image_url', image_url: { url: `data:${body.mediaType};base64,${body.image}` } }
+      ]}]
+    : [
+        { role: 'system', content: getSystemPrompt() },
+        { role: 'user', content: `Extract deadline:\n\n${body.message}` }
+      ]
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, max_tokens: 1000, temperature: 0.1, messages }),
+  })
+  const json = await res.json()
+  if (!res.ok) throw new Error(json?.error?.message ?? 'Groq failed')
+  const raw = json.choices[0]?.message?.content ?? ''
+  return JSON.parse(extractJson(raw))
+}
+
+// ── GEMINI FALLBACK ───────────────────────────────────────────────────────────
 const TOOLS = [{
-  functionDeclarations: [
-    {
-      name: 'save_deadline_result',
-      description: 'Save the fully analyzed deadline result after reasoning through all fields',
-      parameters: {
-        type: 'OBJECT',
-        properties: {
-          task_name:       { type: 'STRING',  description: 'Short task name' },
-          deadline_text:   { type: 'STRING',  description: 'Human readable deadline' },
-          deadline_iso:    { type: 'STRING',  description: 'ISO 8601 datetime or empty string' },
-          time_remaining:  { type: 'STRING',  description: 'e.g. 2 days 4 hours or OVERDUE' },
-          urgency_score:   { type: 'NUMBER',  description: '0-100' },
-          urgency_level:   { type: 'STRING',  enum: ['Critical','High','Medium','Low'] },
-          category:        { type: 'STRING',  enum: ['Assignment','Bill Payment','Interview','Meeting','Exam','Job Application','Subscription','Other'] },
-          consequence:     { type: 'STRING' },
-          action_plan_now: { type: 'STRING' },
-          action_plan_soon:{ type: 'STRING' },
-          action_plan_emergency: { type: 'STRING' },
-          auto_draft:      { type: 'STRING' },
-          auto_draft_type: { type: 'STRING',  enum: ['extension_request','confirmation','payment_reminder','apology','none'] },
-          language:        { type: 'STRING',  enum: ['en','hi','hinglish'] },
-          confidence:      { type: 'NUMBER',  description: '0-100' },
-        },
-        required: ['task_name','deadline_text','time_remaining','urgency_score','urgency_level','category','consequence','action_plan_now','action_plan_soon','action_plan_emergency','language','confidence'],
+  functionDeclarations: [{
+    name: 'save_deadline_result',
+    description: 'Save the fully analyzed deadline result',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        task_name:             { type: 'STRING' },
+        deadline_text:         { type: 'STRING' },
+        deadline_iso:          { type: 'STRING' },
+        time_remaining:        { type: 'STRING' },
+        urgency_score:         { type: 'NUMBER' },
+        urgency_level:         { type: 'STRING', enum: ['Critical','High','Medium','Low'] },
+        category:              { type: 'STRING', enum: ['Assignment','Bill Payment','Interview','Meeting','Exam','Job Application','Subscription','Other'] },
+        consequence:           { type: 'STRING' },
+        action_plan_now:       { type: 'STRING' },
+        action_plan_soon:      { type: 'STRING' },
+        action_plan_emergency: { type: 'STRING' },
+        auto_draft:            { type: 'STRING' },
+        auto_draft_type:       { type: 'STRING', enum: ['extension_request','confirmation','payment_reminder','apology','none'] },
+        language:              { type: 'STRING', enum: ['en','hi','hinglish'] },
+        confidence:            { type: 'NUMBER' },
       },
+      required: ['task_name','deadline_text','time_remaining','urgency_score','urgency_level','category','consequence','action_plan_now','action_plan_soon','action_plan_emergency','language','confidence'],
     },
-  ],
+  }],
 }]
 
-async function runGeminiAgent(contents: any[], apiKey: string): Promise<any> {
+async function callGemini(body: any, apiKey: string): Promise<any> {
+  const imageParsed = ImageSchema.safeParse(body)
+  const textParsed  = TextSchema.safeParse(body)
+
+  const contents = imageParsed.success
+    ? [{ role: 'user', parts: [
+        { text: 'Extract every deadline detail from this screenshot.' },
+        { inlineData: { mimeType: imageParsed.data.mediaType, data: imageParsed.data.image } }
+      ]}]
+    : [{ role: 'user', parts: [{ text: `Extract the deadline from this message:\n\n${textParsed.data!.message}` }] }]
+
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents, tools: TOOLS, systemInstruction: { parts: [{ text: getSystemPrompt() }] }, generationConfig: { temperature: 0.1, maxOutputTokens: 1200 } }),
+      body: JSON.stringify({
+        contents,
+        tools: TOOLS,
+        systemInstruction: { parts: [{ text: getSystemPrompt() }] },
+        generationConfig: { temperature: 0.1, maxOutputTokens: 1200 },
+      }),
     }
   )
-  return res.json()
-}
-
-async function callGeminiWithFunctionCalling(contents: any[], apiKey: string): Promise<any> {
-  let json = await runGeminiAgent(contents, apiKey)
-
-  // Retry once on 503
+  let json = await res.json()
   if (json?.error?.code === 503) {
     await new Promise(r => setTimeout(r, 2500))
-    json = await runGeminiAgent(contents, apiKey)
+    json = await (await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents, tools: TOOLS, systemInstruction: { parts: [{ text: getSystemPrompt() }] }, generationConfig: { temperature: 0.1, maxOutputTokens: 1200 } }) }
+    )).json()
   }
-  if (json?.error) throw Object.assign(new Error(json.error.message), { status: json.error.code ?? 500 })
+  if (json?.error) throw new Error(json.error.message)
 
-  const candidate = json?.candidates?.[0]
-  const parts = candidate?.content?.parts ?? []
-
-  // Check if model used function call (agentic)
+  const parts = json?.candidates?.[0]?.content?.parts ?? []
   const fnCall = parts.find((p: any) => p.functionCall)
   if (fnCall) {
-    const args = fnCall.functionCall.args
+    const a = fnCall.functionCall.args
     return {
-      task_name: args.task_name, deadline_text: args.deadline_text,
-      deadline_iso: args.deadline_iso || null, time_remaining: args.time_remaining,
-      urgency_score: args.urgency_score, urgency_level: args.urgency_level,
-      category: args.category, consequence: args.consequence,
-      action_plan: { now: args.action_plan_now, soon: args.action_plan_soon, emergency: args.action_plan_emergency },
-      auto_draft: args.auto_draft ?? '', auto_draft_type: args.auto_draft_type ?? 'none',
-      language: args.language, confidence: args.confidence,
+      task_name: a.task_name, deadline_text: a.deadline_text,
+      deadline_iso: a.deadline_iso || null, time_remaining: a.time_remaining,
+      urgency_score: a.urgency_score, urgency_level: a.urgency_level,
+      category: a.category, consequence: a.consequence,
+      action_plan: { now: a.action_plan_now, soon: a.action_plan_soon, emergency: a.action_plan_emergency },
+      auto_draft: a.auto_draft ?? '', auto_draft_type: a.auto_draft_type ?? 'none',
+      language: a.language, confidence: a.confidence,
     }
   }
-
-  // Fallback: parse text response
   const text = parts.find((p: any) => p.text)?.text ?? ''
   if (!text) throw new Error('Empty Gemini response')
   return JSON.parse(extractJson(text))
-}
-
-async function callGroqFallback(body: any): Promise<{ data: any; provider: string }> {
-  const groqKey = process.env.GROQ_API_KEY
-  if (!groqKey) throw new Error('No Groq key')
-  const isImage = 'image' in body
-  const messages = isImage
-    ? [{ role: 'user', content: [{ type: 'text', text: getSystemPrompt() + '\n\nExtract deadline from this image.' }, { type: 'image_url', image_url: { url: `data:${body.mediaType};base64,${body.image}` } }] }]
-    : [{ role: 'system', content: getSystemPrompt() }, { role: 'user', content: `Extract deadline:\n\n${body.message}` }]
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST', headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'llama3-70b-8192', max_tokens: 900, temperature: 0.1, messages }),
-  })
-  const json = await res.json()
-  if (!res.ok) throw new Error(json?.error?.message ?? 'Groq failed')
-  const raw = json.choices[0]?.message?.content ?? ''
-  return { data: JSON.parse(extractJson(raw)), provider: 'groq' }
 }
 
 async function checkRateLimit(ip: string) {
@@ -128,32 +143,39 @@ export async function POST(req: NextRequest) {
 
   const imageParsed = ImageSchema.safeParse(body)
   const textParsed  = TextSchema.safeParse(body)
-  if (!imageParsed.success && !textParsed.success) return Response.json({ success: false, message: 'Paste a message or upload a screenshot.' }, { status: 400 })
-
-  const geminiKey = process.env.GEMINI_API_KEY
+  if (!imageParsed.success && !textParsed.success)
+    return Response.json({ success: false, message: 'Paste a message or upload a screenshot.' }, { status: 400 })
 
   try {
-    let rawData: any, provider = 'gemini'
+    let rawData: any, provider: string
 
+    // ── GROQ FIRST (fast + free) ──
     try {
-      if (!geminiKey) throw new Error('No Gemini key')
-      const contents = imageParsed.success
-        ? [{ role: 'user', parts: [{ text: 'Extract every deadline detail from this screenshot.' }, { inlineData: { mimeType: imageParsed.data.mediaType, data: imageParsed.data.image } }] }]
-        : [{ role: 'user', parts: [{ text: `Extract the deadline from this message:\n\n${textParsed.data!.message}` }] }]
-      rawData = await callGeminiWithFunctionCalling(contents, geminiKey)
-    } catch (err: any) {
-      console.warn('[extract] Gemini failed, trying Groq:', err?.message)
-      const fb = await callGroqFallback(body)
-      rawData = fb.data; provider = fb.provider
+      rawData  = await callGroq(body)
+      provider = 'groq'
+      console.log('[extract] Groq succeeded')
+    } catch (groqErr: any) {
+      // ── GEMINI FALLBACK ──
+      console.warn('[extract] Groq failed, trying Gemini:', groqErr?.message)
+      const geminiKey = process.env.GEMINI_API_KEY
+      if (!geminiKey) throw new Error('Both Groq and Gemini unavailable')
+      rawData  = await callGemini(body, geminiKey)
+      provider = 'gemini'
+      console.log('[extract] Gemini fallback succeeded')
     }
 
-    // Normalize action_plan if it came flat from function calling
+    // Normalize action_plan if flat
     if (rawData.action_plan_now && !rawData.action_plan) {
-      rawData.action_plan = { now: rawData.action_plan_now, soon: rawData.action_plan_soon, emergency: rawData.action_plan_emergency }
+      rawData.action_plan = {
+        now:       rawData.action_plan_now,
+        soon:      rawData.action_plan_soon,
+        emergency: rawData.action_plan_emergency,
+      }
     }
 
     const data = DeadlineResultSchema.parse(rawData)
     return Response.json({ success: true, data, provider })
+
   } catch (err: any) {
     console.error('[extract]', err)
     return Response.json({ success: false, message: 'Could not analyze. Please try again.' }, { status: 500 })
