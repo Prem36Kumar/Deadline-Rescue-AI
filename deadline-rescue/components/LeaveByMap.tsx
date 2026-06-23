@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 
-interface LeaveByMapProps { deadlineIso: string | null; taskName: string }
+interface LeaveByMapProps { deadlineIso: string | null; taskName: string; autoSuggestTravel?: boolean }
 interface LeaveByResult {
   leave_by_iso: string; duration_text: string; distance_text: string
   destination_address: string; destination_lat: number; destination_lng: number
@@ -28,7 +28,7 @@ function loadLeaflet(): Promise<any> {
   })
 }
 
-export default function LeaveByMap({ deadlineIso, taskName }: LeaveByMapProps) {
+export default function LeaveByMap({ deadlineIso, taskName, autoSuggestTravel }: LeaveByMapProps) {
   const [destination, setDestination] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -58,6 +58,7 @@ export default function LeaveByMap({ deadlineIso, taskName }: LeaveByMapProps) {
   }, [data, coords])
 
   if (!deadlineIso) return null
+  const travelHint = autoSuggestTravel && !data
 
   function calculate() {
     if (!destination.trim()) { setError('Enter where you need to go'); return }
@@ -85,9 +86,14 @@ export default function LeaveByMap({ deadlineIso, taskName }: LeaveByMapProps) {
   return (
     <div className="rounded-xl p-4 flex flex-col gap-3" style={{ background: 'var(--surface2)', border: '1px solid var(--border)' }}>
       <p className="font-mono text-xs uppercase tracking-widest" style={{ color: 'var(--text3)' }}>🗺 Leave-by calculator</p>
+      {autoSuggestTravel && !data && (
+        <p className="text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(124,111,255,0.08)', border: '1px solid var(--accent-glow)', color: 'var(--accent)' }}>
+          🤖 Agent detected this needs travel — enter the venue to calculate leave-by time
+        </p>
+      )}
       <div className="flex gap-2">
         <input value={destination} onChange={(e) => setDestination(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') calculate() }}
-          placeholder={`Where is "${taskName}"? e.g. BESCOM office, Whitefield`} className="flex-1 text-sm rounded-lg px-3 py-2"
+          placeholder={autoSuggestTravel ? `Where is the ${taskName} venue? e.g. Razorpay office, Bangalore` : `Where is "${taskName}"? e.g. BESCOM office, Whitefield`} className="flex-1 text-sm rounded-lg px-3 py-2"
           style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }} />
         <button onClick={calculate} disabled={loading} className="px-4 rounded-lg text-xs font-semibold"
           style={{ background: 'var(--accent)', color: 'white', opacity: loading ? 0.7 : 1 }}>{loading ? '...' : 'Go'}</button>
@@ -103,9 +109,9 @@ export default function LeaveByMap({ deadlineIso, taskName }: LeaveByMapProps) {
             <p className="text-xs mt-1" style={{ color: 'var(--text2)' }}>{data.distance_text} · {data.duration_text} to {data.destination_address}</p>
           </div>
           <div ref={mapDivRef} className="w-full rounded-lg" style={{ height: 220, border: '1px solid var(--border)' }} />
-          <a href={`https://www.openstreetmap.org/directions?from=${coords?.lat}%2C${coords?.lng}&to=${data.destination_lat}%2C${data.destination_lng}`}
+          <a href={`https://www.google.com/maps/dir/?api=1&origin=${coords?.lat},${coords?.lng}&destination=${data.destination_lat},${data.destination_lng}&travelmode=driving`}
             target="_blank" rel="noreferrer" className="text-xs text-center py-2 rounded-lg" style={{ border: '1px solid var(--border)', color: 'var(--text2)' }}>
-            Open full directions in OpenStreetMap →
+            Open in Google Maps →
           </a>
         </div>
       )}

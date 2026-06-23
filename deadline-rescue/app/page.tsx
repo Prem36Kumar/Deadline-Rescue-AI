@@ -479,7 +479,7 @@ export default function Home() {
               </div>
 
               <SubtaskBreakdown result={result} prefetchedSubtasks={autoSubtasks} />
-              <LeaveByMap deadlineIso={result.deadline_iso} taskName={result.task_name} />
+              <LeaveByMap deadlineIso={result.deadline_iso} taskName={result.task_name} autoSuggestTravel={result.category === 'Interview' || result.category === 'Meeting'} />
 
               {result.auto_draft && result.auto_draft_type !== 'none' && (
                 <div>
