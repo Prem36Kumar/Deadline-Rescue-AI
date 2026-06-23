@@ -98,7 +98,7 @@ async function callGroqFallback(body: any): Promise<{ data: any; provider: strin
     : [{ role: 'system', content: getSystemPrompt() }, { role: 'user', content: `Extract deadline:\n\n${body.message}` }]
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST', headers: { Authorization: `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'llama-3.3-70b-versatile', max_tokens: 900, temperature: 0.1, messages }),
+    body: JSON.stringify({ model: 'llama3-70b-8192', max_tokens: 900, temperature: 0.1, messages }),
   })
   const json = await res.json()
   if (!res.ok) throw new Error(json?.error?.message ?? 'Groq failed')

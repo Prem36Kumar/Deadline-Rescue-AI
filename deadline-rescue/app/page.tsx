@@ -5,6 +5,7 @@ import type { DeadlineResult, UrgencyLevel } from '@/lib/schema'
 import SubtaskBreakdown from '@/components/SubtaskBreakdown'
 import LeaveByMap from '@/components/LeaveByMap'
 import SaveToDashboard from '@/components/SaveToDashboard'
+import AddToGoogleCalendar from '@/components/AddToGoogleCalendar'
 
 type InputMode = 'paste' | 'image'
 

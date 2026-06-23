@@ -68,7 +68,7 @@ async function callGroq(prompt: string, apiKey: string): Promise<Subtask[]> {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'llama-3.3-70b-versatile',
+      model: 'llama3-70b-8192',
       max_tokens: 700,
       temperature: 0.2,
       messages: [
