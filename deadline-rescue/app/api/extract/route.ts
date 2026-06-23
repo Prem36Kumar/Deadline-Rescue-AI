@@ -9,7 +9,8 @@ function getGemini() { return new GoogleGenAI({ apiKey: process.env.GEMINI_API_K
 function getGroq()   { return new Groq({ apiKey: process.env.GROQ_API_KEY ?? '' }) }
 
 const GEMINI_MODEL = 'gemini-2.5-flash'
-const GROQ_MODEL   = 'llama-3.3-70b-versatile'
+const GROQ_MODEL = 'llama-3.3-70b-versatile' // text only
+const GROQ_VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct' // image+text
 
 const TextSchema  = z.object({ message: z.string().min(10).max(3000) })
 const ImageSchema = z.object({ image: z.string().min(10), mediaType: z.string().min(3) })
@@ -54,7 +55,7 @@ async function callGeminiImage(image: string, mediaType: string): Promise<string
 
 async function callGroqText(message: string): Promise<string> {
   const r = await getGroq().chat.completions.create({
-    model: GROQ_MODEL, max_tokens: 800, temperature: 0.1,
+    model: GROQ_VISION_MODEL, max_tokens: 800, temperature: 0.1,
     messages: [
       { role: 'system', content: getSystemPrompt() },
       { role: 'user',   content: `Extract the deadline from this message:\n\n${message}` },
@@ -65,11 +66,12 @@ async function callGroqText(message: string): Promise<string> {
 
 async function callGroqImage(image: string, mediaType: string): Promise<string> {
   const r = await (getGroq().chat.completions.create as any)({
-    model: 'llama-3.3-70b-versatile', max_tokens: 800, temperature: 0.1,
+    model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+    max_tokens: 800, temperature: 0.1,
     messages: [{
       role: 'user',
       content: [
-        { type: 'text',      text: getSystemPrompt() + '\n\nRead all text in this screenshot and extract every deadline-related detail as instructed.' },
+        { type: 'text', text: getSystemPrompt() + '\n\nRead all text in this screenshot and extract every deadline-related detail as instructed.' },
         { type: 'image_url', image_url: { url: `data:${mediaType};base64,${image}` } },
       ],
     }],
