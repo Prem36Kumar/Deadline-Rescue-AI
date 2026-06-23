@@ -13,7 +13,7 @@ export default function AddToGoogleCalendar({
 }) {
   if (!deadlineIso) return null
 
-  function buildUrl() {
+  function buildUrl(): string {
     const start = new Date(deadlineIso!)
     const end = new Date(start.getTime() + 30 * 60 * 1000)
     const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, '').replace('.000', '')
