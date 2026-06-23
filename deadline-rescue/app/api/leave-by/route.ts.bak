@@ -1,0 +1,59 @@
+import { NextRequest, NextResponse } from 'next/server'
+
+export async function POST(req: NextRequest) {
+  try {
+    const { origin_lat, origin_lng, destination, deadline_iso } = await req.json()
+
+    if (!origin_lat || !origin_lng || !destination || !deadline_iso) {
+      return NextResponse.json({ success: false, message: 'Missing required fields.' }, { status: 400 })
+    }
+
+    const key = process.env.GOOGLE_MAPS_API_KEY
+    if (!key) {
+      return NextResponse.json(
+        { success: false, message: 'GOOGLE_MAPS_API_KEY is not set on the server.' },
+        { status: 500 }
+      )
+    }
+
+    const params = new URLSearchParams({
+      origins: `${origin_lat},${origin_lng}`,
+      destinations: destination,
+      departure_time: 'now',
+      traffic_model: 'best_guess',
+      key,
+    })
+
+    const res = await fetch(`https://maps.googleapis.com/maps/api/distancematrix/json?${params.toString()}`)
+    const json = await res.json()
+
+    const element = json?.rows?.[0]?.elements?.[0]
+    if (json.status !== 'OK' || !element || element.status !== 'OK') {
+      return NextResponse.json(
+        { success: false, message: 'Could not find that destination. Try a more specific address.' },
+        { status: 400 }
+      )
+    }
+
+    const durationSeconds = element.duration_in_traffic?.value ?? element.duration?.value ?? 0
+    const trafficAware = !!element.duration_in_traffic
+    const bufferSeconds = 10 * 60 // 10 min safety buffer
+
+    const deadline = new Date(deadline_iso).getTime()
+    const leaveByMs = deadline - durationSeconds * 1000 - bufferSeconds * 1000
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        leave_by_iso: new Date(leaveByMs).toISOString(),
+        duration_text: trafficAware ? element.duration_in_traffic.text : element.duration.text,
+        distance_text: element.distance.text,
+        destination_address: json.destination_addresses?.[0] ?? destination,
+        traffic_aware: trafficAware,
+      },
+    })
+  } catch (err) {
+    console.error(err)
+    return NextResponse.json({ success: false, message: 'Server error calculating travel time.' }, { status: 500 })
+  }
+}
